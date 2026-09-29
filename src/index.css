@@ -155,3 +155,18 @@ label.inline input { width: 80px; }
   .timeline .t { grid-row: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* engine (Sep 30 2026) */
+.engine-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.engine-head h1 { margin-bottom: 4px; }
+.controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.engine-figs { margin-top: 14px; }
+.run { font-size: 17px; font-weight: 600; padding-top: 6px; }
+.run-good { color: var(--good); } .run-warn { color: #8a5a00; } .run-bad { color: var(--bad); } .run-quiet { color: var(--slate); }
+.figure .n.fig-date { font-size: 24px; }
+.up { color: var(--good); } .down { color: var(--bad); }
+.small { font-size: 12.5px; margin: 10px 0 0; }
+th.r, td.r { text-align: right; }
+.kill-banner { margin: 6px 0 14px; padding: 12px 14px; background: var(--bad-soft); border-left: 4px solid var(--bad); color: #6d2323; }
+.incident-form { margin-top: 14px; }
+.incident-form input[type=date] { width: 170px; }

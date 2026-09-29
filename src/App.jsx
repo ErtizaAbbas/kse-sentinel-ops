@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, hasSession, SessionEnded, signIn, signOut } from "./api.js";
+import Engine from "./Engine.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
 
@@ -85,6 +86,7 @@ export default function App() {
   const nav = [
     ["overview", "Overview"],
     ["onboarding", "Onboarding"],
+    ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
     ...(me.team_role === "owner" ? [["audit", "Audit trail"]] : []),
   ];
   return (
@@ -108,6 +110,7 @@ export default function App() {
       <main className="work">
         {section === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
         {section === "onboarding" && <Onboarding onEnded={ended} />}
+        {section === "engine" && <Engine onEnded={ended} />}
         {section === "audit" && <Audit onEnded={ended} />}
       </main>
     </div>
