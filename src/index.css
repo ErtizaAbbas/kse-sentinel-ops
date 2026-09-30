@@ -170,3 +170,36 @@ th.r, td.r { text-align: right; }
 .kill-banner { margin: 6px 0 14px; padding: 12px 14px; background: var(--bad-soft); border-left: 4px solid var(--bad); color: #6d2323; }
 .incident-form { margin-top: 14px; }
 .incident-form input[type=date] { width: 170px; }
+/* engine v2 (Sep 30 2026): numbers, chart, exposure bar */
+table.plain th.r, table.plain td.r { text-align: right; }   /* wins over the general left-aligned header rule */
+table.nums { font-size: 12.5px; }
+table.nums th, table.nums td { padding: 8px 7px; }
+table.nums th { vertical-align: bottom; line-height: 1.3; }
+table.nums th.r { min-width: 64px; }
+table.nums td.fig { white-space: nowrap; }
+table.nums td:first-child, table.nums th:first-child { padding-left: 2px; }
+table.nums .sub-inline { color: var(--muted); font-size: 11.5px; }
+.strong { font-weight: 600; }
+.delta { display: block; font-family: "IBM Plex Mono", monospace; font-size: 12px; margin-top: 2px; }
+.chart { margin-top: 18px; background: #fff; border: 1px solid var(--line); padding: 12px 14px 8px; }
+.chart-read { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--slate); min-height: 22px; }
+.chart-read b { color: var(--ink); font-weight: 600; }
+.chart-read b.up { color: var(--good); } .chart-read b.down { color: var(--bad); }
+.chart-svg { width: 100%; height: 260px; display: block; margin-top: 8px; cursor: crosshair; touch-action: pan-y; }
+.chart-line { fill: none; stroke: var(--navy); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart-dd { fill: rgba(163, 54, 54, 0.12); stroke: none; }
+.chart-base { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.chart-cursor { stroke: var(--gold); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-dot { fill: var(--gold); stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bar-up { fill: var(--good); opacity: 0.75; } .bar-down { fill: var(--bad); opacity: 0.75; }
+.chart-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.split { height: 8px; background: #e4e6ee; border-radius: 4px; overflow: hidden; margin: 4px 0 12px; }
+.split span { display: block; height: 100%; background: var(--gold); }
+
+/* team MFA sign-in (Sep 30 2026) */
+.signin form.wide { width: min(460px, 100%); }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.steps li { padding-left: 2px; }
+.qr { display: block; margin: 10px 0 6px; border: 1px solid var(--line); }
+.key { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--page); padding: 1px 5px; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+input.code { font-family: "IBM Plex Mono", monospace; font-size: 22px; letter-spacing: 0.3em; text-align: center; }

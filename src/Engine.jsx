@@ -6,7 +6,12 @@
  * sign-in enforcement went live). Read-only, per client tenant:
  *   run status, 60-day forward-paper progress, portfolio snapshot, strategies,
  *   live signals, sizing, kill switch, scan health, lot sizes, incident notes.
- * Backend: app/routers/ops_engine.py (team roles support and owner).
+ * Backend: app/routers/ops_engine.py and ops_engine_perf.py (team roles support and owner).
+ *
+ * v2 (Sep 30 2026): performance in PKR and %: equity curve with daily and
+ * cumulative returns and drawdown, exposure, open positions marked to market,
+ * closed trades, per-strategy win rate and profit factor. Every number column
+ * is right-aligned in fixed-width digits, with its unit in the header.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
@@ -29,8 +34,11 @@ const SIGNAL_FILTERS = [
   ["POSITION_CLOSED", "Positions closed"], ["NO_SIGNAL", "No signal"],
 ];
 const ACTION_LABEL = Object.fromEntries(SIGNAL_FILTERS.filter(([v]) => v));
-const pkr = (n) => (n == null ? "" : `PKR ${Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
-const signed = (n) => (n == null ? "" : `${n > 0 ? "+" : ""}${Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
+const num = (n, dp = 0) => (n == null ? "" : Number(n).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }));
+const signed = (n, dp = 0) => (n == null ? "" : `${n > 0 ? "+" : ""}${num(n, dp)}`);
+const pct = (n) => (n == null ? "" : `${n > 0 ? "+" : ""}${num(n, 2)}%`);
+const plainPct = (n) => (n == null ? "" : `${num(n, 2)}%`);
+const tone = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
 const DAY = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 const day = (iso) => (iso ? DAY.format(new Date(`${String(iso).slice(0, 10)}T12:00:00`)) : "");
 const todayPkt = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(new Date());
@@ -40,6 +48,7 @@ export default function Engine({ onEnded }) {
   const [tenantId, setTenantId] = useState(null);
   const [timeframe, setTimeframe] = useState("1D");
   const [sum, setSum] = useState(null);
+  const [perf, setPerf] = useState(null);
   const [error, setError] = useState(null);
   const [stamp, setStamp] = useState(0);
 
@@ -55,6 +64,9 @@ export default function Engine({ onEnded }) {
     api(`/api/v1/ops-console/engine/summary?tenant_id=${tenantId}&timeframe=${timeframe}`)
       .then((d) => { if (live) { setSum(d); setError(null); } })
       .catch((e) => { if (live && !onEnded(e)) setError(e.message); });
+    api(`/api/v1/ops-console/engine/performance?tenant_id=${tenantId}&timeframe=${timeframe}`)
+      .then((d) => { if (live) setPerf({ ok: true, data: d }); })
+      .catch((e) => { if (live && !onEnded(e)) setPerf({ ok: false, error: e.message }); });
     return () => { live = false; };
   }, [tenantId, timeframe, stamp, onEnded]);
 
@@ -64,7 +76,7 @@ export default function Engine({ onEnded }) {
         <h1>Engine</h1>
         <div className="controls">
           <label>Client
-            <select value={tenantId ?? ""} onChange={(e) => { setSum(null); setTenantId(Number(e.target.value)); }}>
+            <select value={tenantId ?? ""} onChange={(e) => { setSum(null); setPerf(null); setTenantId(Number(e.target.value)); }}>
               {(tenants || []).map((t) => (
                 <option key={t.tenant_id} value={t.tenant_id}>
                   {t.company_name}{t.snapshot_days ? `, ${t.snapshot_days} days recorded` : ""}
@@ -73,7 +85,7 @@ export default function Engine({ onEnded }) {
             </select>
           </label>
           <label>Timeframe
-            <select value={timeframe} onChange={(e) => { setSum(null); setTimeframe(e.target.value); }}>
+            <select value={timeframe} onChange={(e) => { setSum(null); setPerf(null); setTimeframe(e.target.value); }}>
               <option value="1D">Daily (investment)</option>
               <option value="1H">Hourly (intraday)</option>
             </select>
@@ -85,7 +97,7 @@ export default function Engine({ onEnded }) {
       {error && <p className="msg bad">{error}</p>}
       {tenants && tenants.length === 0 && <p className="quiet">No client tenants yet.</p>}
       {!sum && !error && tenantId != null && <p className="quiet">Loading</p>}
-      {sum && <Panels sum={sum} tenantId={tenantId} timeframe={timeframe} onEnded={onEnded} onChanged={() => setStamp((s) => s + 1)} />}
+      {sum && <Panels sum={sum} perf={perf} tenantId={tenantId} timeframe={timeframe} onEnded={onEnded} onChanged={() => setStamp((s) => s + 1)} />}
     </section>
   );
 }
@@ -94,7 +106,9 @@ function Failed({ panel }) {
   return <p className="msg bad">Not available: {panel.error}</p>;
 }
 
-function Panels({ sum, tenantId, timeframe, onEnded, onChanged }) {
+function Panels({ sum, perf, tenantId, timeframe, onEnded, onChanged }) {
+  const eq = perf?.ok ? perf.data.equity : null;
+  const lastDay = eq && eq.series.length ? eq.series[eq.series.length - 1] : null;
   const hb = sum.heartbeat, pr = sum.progress, ks = sum.kill_switch;
   const run = hb.ok ? (RUN_STATUS[hb.data.status] || [hb.data.status, "quiet", ""]) : null;
   return (
@@ -120,8 +134,13 @@ function Panels({ sum, tenantId, timeframe, onEnded, onChanged }) {
           <span className="l">last recorded run{hb.ok && hb.data.days_since_last_run != null ? `, ${hb.data.days_since_last_run} day(s) ago` : ""}</span>
         </div>
         <div className="figure">
-          <span className="n">{hb.ok && hb.data.last_snapshot_equity != null ? Number(hb.data.last_snapshot_equity).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "?"}</span>
-          <span className="l">equity in PKR at last snapshot</span>
+          <span className="n">{hb.ok && hb.data.last_snapshot_equity != null ? num(hb.data.last_snapshot_equity) : "?"}</span>
+          <span className="l">
+            equity in PKR at last snapshot
+            {lastDay && lastDay.daily_change_pkr != null && (
+              <span className={`delta ${tone(lastDay.daily_change_pkr)}`}> {signed(lastDay.daily_change_pkr)} ({pct(lastDay.daily_change_pct)}) on the day</span>
+            )}
+          </span>
         </div>
       </div>
       {pr.ok && (
@@ -131,7 +150,17 @@ function Panels({ sum, tenantId, timeframe, onEnded, onChanged }) {
         </p>
       )}
 
-      <Portfolio sum={sum} />
+      {!perf ? <p className="quiet">Loading performance</p>
+        : !perf.ok ? <><h2>Performance</h2><p className="msg bad">Not available: {perf.error}</p></>
+          : (
+            <>
+              <Performance eq={perf.data.equity} />
+              <Exposure ex={perf.data.exposure} sum={sum} />
+              <Positions rows={perf.data.positions} />
+              <Strategies stats={perf.data.strategies} />
+              <Closed closed={perf.data.closed} />
+            </>
+          )}
       <Signals tenantId={tenantId} timeframe={timeframe} onEnded={onEnded} />
       <Health sum={sum} />
       <Incidents sum={sum} tenantId={tenantId} onEnded={onEnded} onChanged={onChanged} />
@@ -140,61 +169,263 @@ function Panels({ sum, tenantId, timeframe, onEnded, onChanged }) {
   );
 }
 
-function Portfolio({ sum }) {
-  const st = sum.strategies, po = sum.portfolio;
-  if (!st.ok) return <><h2>Portfolio</h2><Failed panel={st} /></>;
-  const names = Object.keys(st.data.strategies || {});
-  const totals = names.reduce((a, n) => ({
-    pnl: a.pnl + (st.data.strategies[n].total_realized_pnl_pkr || 0),
-    closed: a.closed + (st.data.strategies[n].closed_trades || 0),
-    open: a.open + (st.data.strategies[n].open_positions || 0),
-  }), { pnl: 0, closed: 0, open: 0 });
-  const overlap = po.ok && po.data.exposure_by_ticker
-    ? Object.entries(po.data.exposure_by_ticker).filter(([, v]) => v.held_by_multiple_strategies) : [];
-  const open = po.ok && po.data.summary ? po.data.summary.total_open_positions : totals.open;
+/* ------------------------------------------------------------ performance (v2) */
+
+function Figure({ value, label, cls = "" }) {
+  return (
+    <div className="figure">
+      <span className={`n ${cls}`}>{value}</span>
+      <span className="l">{label}</span>
+    </div>
+  );
+}
+
+function Performance({ eq }) {
+  if (!eq || eq.count === 0) return <><h2>Performance</h2><p className="quiet">No daily snapshots yet for this client and timeframe.</p></>;
   return (
     <>
-      <h2>Portfolio</h2>
+      <h2>Performance</h2>
       <div className="figures">
-        <div className="figure">
-          <span className={`n ${totals.pnl > 0 ? "up" : totals.pnl < 0 ? "down" : ""}`}>{signed(totals.pnl)}</span>
-          <span className="l">realized PnL in PKR, all time, {totals.closed} closed trade(s)</span>
-        </div>
-        <div className="figure">
-          <span className="n">{open}</span>
-          <span className="l">open positions{po.ok && po.data.summary ? `, ${po.data.summary.distinct_tickers_held} ticker(s)` : ""}</span>
-        </div>
-        <div className="figure">
-          <span className="n">{overlap.length}</span>
-          <span className="l">ticker(s) held by more than one strategy</span>
-        </div>
+        <Figure value={pct(eq.total_return_pct)} cls={tone(eq.total_return_pct)}
+                label={<>total return since {day(eq.series[0].date)}<span className={`delta ${tone(eq.total_return_pkr)}`}> {signed(eq.total_return_pkr)} PKR</span></>} />
+        <Figure value={plainPct(eq.max_drawdown_pct)} cls={eq.max_drawdown_pct > 0 ? "down" : ""} label="maximum drawdown from a peak" />
+        <Figure value={plainPct(eq.current_drawdown_pct)} cls={eq.current_drawdown_pct > 0 ? "down" : ""}
+                label={eq.current_drawdown_pct > 0 ? "below the highest equity so far" : "at the highest equity so far"} />
+        <Figure value={`${eq.up_days} / ${eq.down_days}`} label={`up days / down days${eq.flat_days ? `, ${eq.flat_days} flat` : ""}`} />
+      </div>
+      <EquityChart series={eq.series} />
+      <p className="quiet small">
+        {eq.best_day && <>Best day {day(eq.best_day.date)}: <span className="up">{signed(eq.best_day.change_pkr)} PKR ({pct(eq.best_day.change_pct)})</span>. </>}
+        {eq.worst_day && <>Worst day {day(eq.worst_day.date)}: <span className="down">{signed(eq.worst_day.change_pkr)} PKR ({pct(eq.worst_day.change_pct)})</span>.</>}
+      </p>
+    </>
+  );
+}
+
+/* Equity line with drawdown shading beneath it and a daily-change bar strip;
+   hover or tap for the exact figures of any day. */
+function EquityChart({ series }) {
+  const [hover, setHover] = useState(null);
+  const W = 900, H = 230, P = { l: 8, r: 8, t: 12, b: 8 }, BAR = 56;
+  const vals = series.map((s) => s.equity_pkr);
+  const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.08 || hi * 0.01 || 1;
+  const y0 = lo - pad, y1 = hi + pad;
+  const n = series.length;
+  const x = (i) => P.l + (n === 1 ? (W - P.l - P.r) / 2 : (i * (W - P.l - P.r)) / (n - 1));
+  const y = (v) => P.t + (1 - (v - y0) / (y1 - y0)) * (H - P.t - P.b);
+  const line = series.map((s, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(s.equity_pkr).toFixed(1)}`).join(" ");
+  const peaks = series.reduce((acc, s) => [...acc, Math.max(acc.length ? acc[acc.length - 1] : -Infinity, s.equity_pkr)], []);
+  const dd = series.map((s, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(peaks[i]).toFixed(1)}`).join(" ")
+    + " " + [...series].reverse().map((s, j) => `L${x(n - 1 - j).toFixed(1)},${y(s.equity_pkr).toFixed(1)}`).join(" ") + " Z";
+  const maxMove = Math.max(...series.map((s) => Math.abs(s.daily_change_pct || 0)), 0.01);
+  const bw = Math.max(1.5, ((W - P.l - P.r) / Math.max(n, 1)) * 0.7);
+  const move = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const fx = ((e.clientX - r.left) / r.width) * W;
+    setHover(Math.max(0, Math.min(n - 1, Math.round(((fx - P.l) / (W - P.l - P.r)) * (n - 1)))));
+  };
+  const h = hover != null ? series[hover] : series[n - 1];
+  return (
+    <div className="chart">
+      <div className="chart-read">
+        <span className="fig">{day(h.date)}</span>
+        <span>Equity <b className="fig">{num(h.equity_pkr)}</b> PKR</span>
+        <span>Day <b className={`fig ${tone(h.daily_change_pkr)}`}>{signed(h.daily_change_pkr)} ({pct(h.daily_change_pct)})</b></span>
+        <span>Since start <b className={`fig ${tone(h.cumulative_return_pct)}`}>{pct(h.cumulative_return_pct)}</b></span>
+        <span>Drawdown <b className={`fig ${h.drawdown_pct > 0 ? "down" : ""}`}>{plainPct(h.drawdown_pct)}</b></span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H + BAR}`} className="chart-svg" role="img" preserveAspectRatio="none"
+           aria-label={`Equity from ${num(series[0].equity_pkr)} to ${num(series[n - 1].equity_pkr)} PKR over ${n} days`}
+           onMouseMove={move} onMouseLeave={() => setHover(null)} onTouchStart={(e) => move(e.touches[0] ? { currentTarget: e.currentTarget, clientX: e.touches[0].clientX } : e)}>
+        <line x1={P.l} x2={W - P.r} y1={y(series[0].equity_pkr)} y2={y(series[0].equity_pkr)} className="chart-base" />
+        <path d={dd} className="chart-dd" />
+        <path d={line} className="chart-line" />
+        {series.map((s, i) => {
+          const v = s.daily_change_pct || 0, bh = (Math.abs(v) / maxMove) * (BAR / 2 - 4), mid = H + BAR / 2;
+          return <rect key={i} x={x(i) - bw / 2} y={v >= 0 ? mid - bh : mid} width={bw} height={Math.max(bh, 0.5)} className={v >= 0 ? "bar-up" : "bar-down"} />;
+        })}
+        <line x1={P.l} x2={W - P.r} y1={H + BAR / 2} y2={H + BAR / 2} className="chart-base" />
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={P.t} y2={H + BAR} className="chart-cursor" />}
+        {hover != null && <circle cx={x(hover)} cy={y(series[hover].equity_pkr)} r="4" className="chart-dot" />}
+      </svg>
+      <div className="chart-axis fig"><span>{day(series[0].date)}</span><span>{num(lo)} to {num(hi)} PKR</span><span>{day(series[n - 1].date)}</span></div>
+      <p className="quiet small">Line: equity. Shaded: distance below the running peak (drawdown). Bars: daily change in %.</p>
+    </div>
+  );
+}
+
+function Exposure({ ex, sum }) {
+  const po = sum.portfolio;
+  const overlap = po.ok && po.data.exposure_by_ticker
+    ? Object.entries(po.data.exposure_by_ticker).filter(([, v]) => v.held_by_multiple_strategies) : [];
+  const inv = Math.max(0, Math.min(100, ex.invested_pct || 0));
+  return (
+    <>
+      <h2>Exposure</h2>
+      <div className="split" aria-hidden="true"><span style={{ width: `${inv}%` }} /></div>
+      <div className="figures">
+        <Figure value={plainPct(ex.invested_pct)} label={<>invested, {num(ex.invested_pkr)} PKR</>} />
+        <Figure value={plainPct(ex.not_invested_pct)} label={<>not invested, {num(ex.not_invested_pkr)} PKR</>} />
+        <Figure value={ex.by_ticker.length} label={`ticker(s) held${ex.unpriced_positions ? `; ${ex.unpriced_positions} without a synced price` : ""}`} />
+        <Figure value={overlap.length} label="ticker(s) held by more than one strategy" />
       </div>
       {overlap.length > 0 && (
         <p className="note">
-          Overlapping exposure: {overlap.map(([t, v]) => `${t} (${v.strategies.map((s) => STRATEGY_NAMES[s] || s).join(" and ")}, ${pkr(v.total_notional_pkr)} combined)`).join("; ")}.
+          Overlapping exposure: {overlap.map(([t, v]) => `${t} (${v.strategies.map((s) => STRATEGY_NAMES[s] || s).join(" and ")})`).join("; ")}.
         </p>
       )}
-      {names.length === 0
-        ? <p className="quiet">No positions or trades recorded yet for any strategy.</p>
-        : (
-          <table className="plain">
-            <thead><tr><th>Strategy</th><th className="r">Open</th><th className="r">Closed</th><th className="r">Realized PnL (PKR)</th><th className="r">Average per trade</th></tr></thead>
+      {ex.by_ticker.length > 0 && (
+        <div className="scroll">
+          <table className="plain nums">
+            <thead><tr><th>Ticker</th><th>Strategies</th><th className="r">Market value (PKR)</th><th className="r">Share of equity (%)</th></tr></thead>
+            <tbody>
+              {ex.by_ticker.map((t) => (
+                <tr key={t.symbol}>
+                  <td>{t.symbol}</td>
+                  <td>{t.strategies.map((s) => STRATEGY_NAMES[s] || s).join(", ")}</td>
+                  <td className="r fig">{num(t.market_value_pkr)}</td>
+                  <td className="r fig">{t.pct_of_equity == null ? "" : num(t.pct_of_equity, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Positions({ rows }) {
+  return (
+    <>
+      <h2>Open positions</h2>
+      {rows.length === 0 ? <p className="quiet">No open positions.</p> : (
+        <div className="scroll">
+          <table className="plain nums">
+            <thead>
+              <tr>
+                <th>Ticker</th><th>Strategy</th><th>Entered</th><th className="r">Days</th><th className="r">Units</th>
+                <th className="r">Entry (PKR)</th><th className="r">Last (PKR)</th><th className="r">Value (PKR)</th>
+                <th className="r">Unrealized (PKR)</th><th className="r">Unrealized (%)</th><th className="r">Of equity (%)</th>
+                <th className="r">Stop (PKR)</th><th className="r">To stop (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.position_id}>
+                  <td>{p.symbol}{p.direction === "SHORT" ? <span className="sub">short</span> : null}</td>
+                  <td>{STRATEGY_NAMES[p.strategy] || p.strategy}</td>
+                  <td className="fig">{day(p.entry_date)}</td>
+                  <td className="r fig">{p.days_held ?? ""}</td>
+                  <td className="r fig">{num(p.units)}</td>
+                  <td className="r fig">{num(p.entry_price, 2)}</td>
+                  <td className="r fig">{p.last_close == null ? <span className="quiet">no price</span> : num(p.last_close, 2)}</td>
+                  <td className="r fig">{num(p.market_value_pkr)}</td>
+                  <td className={`r fig ${tone(p.unrealized_pnl_pkr)}`}>{signed(p.unrealized_pnl_pkr)}</td>
+                  <td className={`r fig ${tone(p.unrealized_pnl_pct)}`}>{p.unrealized_pnl_pct == null ? "" : signed(p.unrealized_pnl_pct, 2)}</td>
+                  <td className="r fig">{p.pct_of_equity == null ? "" : num(p.pct_of_equity, 2)}</td>
+                  <td className="r fig">{p.stop == null ? "" : num(p.stop, 2)}</td>
+                  <td className={`r fig ${p.distance_to_stop_pct != null && p.distance_to_stop_pct <= 1 ? "down strong" : ""}`}>
+                    {p.distance_to_stop_pct == null ? "" : num(p.distance_to_stop_pct, 2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.some((p) => p.distance_to_stop_pct != null && p.distance_to_stop_pct <= 1) && (
+        <p className="note">Highlighted: within 1% of its stop, likely to close on the next run.</p>
+      )}
+    </>
+  );
+}
+
+function Strategies({ stats }) {
+  const names = Object.keys(stats || {});
+  return (
+    <>
+      <h2>Strategies</h2>
+      {names.length === 0 ? <p className="quiet">No positions or closed trades yet.</p> : (
+        <div className="scroll">
+          <table className="plain nums">
+            <thead>
+              <tr>
+                <th>Strategy</th><th className="r">Closed</th><th className="r">Win rate (%)</th><th className="r">Realized (PKR)</th>
+                <th className="r">Avg win (PKR)</th><th className="r">Avg win (%)</th><th className="r">Avg loss (PKR)</th><th className="r">Avg loss (%)</th>
+                <th className="r">Profit factor</th><th className="r">Open</th><th className="r">Unrealized (PKR)</th>
+              </tr>
+            </thead>
             <tbody>
               {names.map((n) => {
-                const s = st.data.strategies[n];
+                const s = stats[n];
                 return (
                   <tr key={n}>
                     <td>{STRATEGY_NAMES[n] || n}</td>
+                    <td className="r fig">{s.closed_trades}<span className="sub-inline"> {s.closed_trades ? `(${s.wins}W ${s.losses}L)` : ""}</span></td>
+                    <td className="r fig">{s.win_rate_pct == null ? "" : num(s.win_rate_pct, 2)}</td>
+                    <td className={`r fig ${tone(s.realized_pnl_pkr)}`}>{signed(s.realized_pnl_pkr)}</td>
+                    <td className="r fig up">{s.avg_win_pkr == null ? "" : signed(s.avg_win_pkr)}</td>
+                    <td className="r fig up">{s.avg_win_pct == null ? "" : signed(s.avg_win_pct, 2)}</td>
+                    <td className="r fig down">{s.avg_loss_pkr == null ? "" : signed(s.avg_loss_pkr)}</td>
+                    <td className="r fig down">{s.avg_loss_pct == null ? "" : signed(s.avg_loss_pct, 2)}</td>
+                    <td className="r fig">{s.profit_factor == null ? (s.wins && !s.losses ? "no losses" : "") : num(s.profit_factor, 2)}</td>
                     <td className="r fig">{s.open_positions}</td>
-                    <td className="r fig">{s.closed_trades}</td>
-                    <td className={`r fig ${s.total_realized_pnl_pkr > 0 ? "up" : s.total_realized_pnl_pkr < 0 ? "down" : ""}`}>{signed(s.total_realized_pnl_pkr)}</td>
-                    <td className="r fig">{s.closed_trades > 0 ? signed(s.avg_pnl_per_trade_pkr) : ""}</td>
+                    <td className={`r fig ${tone(s.unrealized_pnl_pkr)}`}>{signed(s.unrealized_pnl_pkr)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        )}
+        </div>
+      )}
+      <p className="quiet small">Profit factor: total gains divided by total losses on closed trades; above 1 means gains outweigh losses.</p>
+    </>
+  );
+}
+
+function Closed({ closed }) {
+  const [all, setAll] = useState(false);
+  const rows = all ? closed.recent : closed.recent.slice(0, 15);
+  return (
+    <>
+      <h2>Closed trades</h2>
+      {closed.total === 0 ? <p className="quiet">No closed trades yet.</p> : (
+        <>
+          <p className="quiet small">
+            {closed.total} closed, {closed.wins} profitable ({plainPct(closed.win_rate_pct)}), realized{" "}
+            <span className={tone(closed.realized_pnl_pkr)}>{signed(closed.realized_pnl_pkr)} PKR</span>.
+          </p>
+          <div className="scroll">
+            <table className="plain nums">
+              <thead>
+                <tr>
+                  <th>Closed</th><th>Ticker</th><th>Strategy</th><th className="r">Units</th><th className="r">Entry (PKR)</th>
+                  <th className="r">Exit (PKR)</th><th className="r">PnL (PKR)</th><th className="r">PnL (%)</th><th>Exit reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t) => (
+                  <tr key={t.trade_id}>
+                    <td className="fig">{day(t.closed_at)}</td>
+                    <td>{t.symbol}</td>
+                    <td>{STRATEGY_NAMES[t.strategy] || t.strategy}</td>
+                    <td className="r fig">{num(t.units)}</td>
+                    <td className="r fig">{num(t.entry_price, 2)}</td>
+                    <td className="r fig">{num(t.exit_price, 2)}</td>
+                    <td className={`r fig ${tone(t.pnl_pkr)}`}>{signed(t.pnl_pkr)}</td>
+                    <td className={`r fig ${tone(t.pnl_pct)}`}>{t.pnl_pct == null ? "" : signed(t.pnl_pct, 2)}</td>
+                    <td>{(t.exit_reason || "").toLowerCase().replaceAll("_", " ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {closed.recent.length > 15 && (
+            <button className="quietbtn" onClick={() => setAll(!all)}>{all ? "Show the latest 15" : `Show all ${closed.recent.length}`}</button>
+          )}
+        </>
+      )}
     </>
   );
 }
@@ -246,7 +477,7 @@ function Signals({ tenantId, timeframe, onEnded }) {
                       <td>{ACTION_LABEL[r.action_taken] || r.action_taken}</td>
                       <td className="why">{r.action_detail || ""}</td>
                       <td>{r.outcome_status === "PENDING" ? <span className="quiet">Pending</span> : (r.outcome_status || "")}</td>
-                      <td className={`r fig ${r.outcome_pnl_pkr > 0 ? "up" : r.outcome_pnl_pkr < 0 ? "down" : ""}`}>{r.outcome_pnl_pkr != null ? signed(r.outcome_pnl_pkr) : ""}</td>
+                      <td className={`r fig ${tone(r.outcome_pnl_pkr)}`}>{r.outcome_pnl_pkr != null ? signed(r.outcome_pnl_pkr) : ""}</td>
                     </tr>
                   ))}
                 </tbody>

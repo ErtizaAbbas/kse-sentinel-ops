@@ -14,7 +14,8 @@
  * Times are shown in Pakistan time (PKT).
  */
 import { useCallback, useEffect, useState } from "react";
-import { api, hasSession, SessionEnded, signIn, signOut } from "./api.js";
+import { api, hasSession, SessionEnded, signIn, signOut, setupMfa, verifyMfa } from "./api.js";
+import QRCode from "qrcode";
 import Engine from "./Engine.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
@@ -122,33 +123,96 @@ function SignIn({ notice, onSignedIn }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  async function submit(e) {
+  const [mfa, setMfa] = useState(null);          // { token, setup, secret, qr }
+  const [code, setCode] = useState("");
+
+  async function submitPassword(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await signIn(email.trim(), password));
+      const r = await signIn(email.trim(), password);
+      if (r.mfa) {
+        let extra = {};
+        if (r.mfa.setup) {
+          const s = await setupMfa(r.mfa.token);
+          extra = { secret: s.secret, qr: await QRCode.toDataURL(s.otpauth_uri, { margin: 1, width: 220, color: { dark: "#1E2761", light: "#FFFFFF" } }) };
+        }
+        setPassword("");
+        setMfa({ ...r.mfa, ...extra });
+      } else {
+        onSignedIn(r);
+      }
     } catch (err) {
-      setError(err.status === 403 && /team account/i.test(err.message)
-        ? "This is not a team account. The console is for the MZE Digital team only."
-        : err.message);
+      setError(err.message);
     } finally {
       setBusy(false);
     }
   }
+
+  async function submitCode(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      onSignedIn(await verifyMfa(mfa.token, code.replace(/\D/g, "")));
+    } catch (err) {
+      if (err.status === 401 && /expired|sign in again/i.test(err.message)) { setMfa(null); setCode(""); }
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const brand = (
+    <div className="brand dark">
+      <span className="brand-mark">KSE Sentinel</span>
+      <span className="brand-name">Operations</span>
+    </div>
+  );
+
+  if (mfa) {
+    return (
+      <div className="signin">
+        <form onSubmit={submitCode} className={mfa.setup ? "wide" : ""}>
+          {brand}
+          {mfa.setup ? (
+            <>
+              <p className="lede">Set up your authenticator. This is needed once; afterwards every sign-in asks for a code.</p>
+              <ol className="steps">
+                <li>Open Google Authenticator or Microsoft Authenticator on your phone and add an account.</li>
+                <li>Scan this code:
+                  <img className="qr" src={mfa.qr} alt="QR code for your authenticator app" width="220" height="220" />
+                  <span className="hint">Cannot scan? Enter this key instead: <code className="key">{mfa.secret.match(/.{1,4}/g).join(" ")}</code></span>
+                </li>
+                <li>Enter the 6-digit code the app now shows.</li>
+              </ol>
+            </>
+          ) : (
+            <p className="lede">Enter the 6-digit code from your authenticator app.</p>
+          )}
+          <label>Authentication code
+            <input className="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*" maxLength="7"
+                   value={code} onChange={(e) => setCode(e.target.value)} autoFocus required />
+          </label>
+          {error && <p className="msg bad" role="alert">{error}</p>}
+          <button className="primary" disabled={busy || code.replace(/\D/g, "").length !== 6}>{busy ? "Checking" : mfa.setup ? "Confirm and sign in" : "Sign in"}</button>
+          <button type="button" className="link" onClick={() => { setMfa(null); setCode(""); setError(null); }}>Start again</button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="signin">
-      <form onSubmit={submit}>
-        <div className="brand dark">
-          <span className="brand-mark">KSE Sentinel</span>
-          <span className="brand-name">Operations</span>
-        </div>
+      <form onSubmit={submitPassword}>
+        {brand}
         <p className="lede">Internal console for the MZE Digital team.</p>
         {notice && <p className="msg">{notice}</p>}
         <label>Email<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
         <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         {error && <p className="msg bad" role="alert">{error}</p>}
-        <button className="primary" disabled={busy}>{busy ? "Signing in" : "Sign in"}</button>
+        <button className="primary" disabled={busy}>{busy ? "Signing in" : "Continue"}</button>
       </form>
     </div>
   );

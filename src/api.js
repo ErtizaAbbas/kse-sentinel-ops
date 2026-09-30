@@ -100,11 +100,41 @@ export async function signIn(email, password) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, describe(data.detail, res.status));
+  // Team MFA (Sep 30 2026): team accounts get a short-lived challenge, not a session.
+  if (data.status === "mfa_required") return { mfa: { token: data.mfa_token, setup: !!data.mfa_setup_required } };
+  // A client account (no challenge) is not a team account: never keep its session here.
+  setToken(data.access_token);
+  await signOut();
+  throw new ApiError(403, "This is not a team account. The console is for the MZE Digital team only.");
+}
+
+async function authPost(path, body) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, "The server could not be reached. Check that the backend is running.");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, describe(data.detail, res.status));
+  return data;
+}
+
+// First sign-in: create the authenticator secret (returned once, for the QR code).
+export const setupMfa = (mfaToken) => authPost("/api/v1/auth/mfa/setup", { mfa_token: mfaToken });
+
+// Second step of every sign-in: the 6-digit code. Opens the session, then confirms the team role.
+export async function verifyMfa(mfaToken, code) {
+  const data = await authPost("/api/v1/auth/mfa/verify", { mfa_token: mfaToken, code });
   setToken(data.access_token);
   try {
     return await api("/api/v1/ops-console/me");
   } catch (e) {
-    // A valid client login that is not a team account must not stay signed in here.
     await signOut();
     throw e;
   }
