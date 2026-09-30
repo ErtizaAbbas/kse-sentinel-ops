@@ -17,6 +17,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api, hasSession, SessionEnded, signIn, signOut, setupMfa, verifyMfa } from "./api.js";
 import QRCode from "qrcode";
 import Engine from "./Engine.jsx";
+import Team from "./Team.jsx";
+import Join from "./Join.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
 
@@ -63,6 +65,7 @@ export default function App() {
   const [checking, setChecking] = useState(hasSession());
   const [section, setSection] = useState("overview");
   const [notice, setNotice] = useState(null);
+  const [joining, setJoining] = useState(window.location.pathname === "/join");
 
   const ended = useCallback((err) => {
     if (err instanceof SessionEnded) {
@@ -81,14 +84,16 @@ export default function App() {
       .finally(() => setChecking(false));
   }, [ended]);
 
+  // An invitation link opens the join page, whatever the session state.
+  if (joining) return <Join onDone={() => { setJoining(false); window.history.replaceState(null, "", "/"); }} />;
   if (checking) return <div className="boot">Checking your session</div>;
   if (!me) return <SignIn notice={notice} onSignedIn={(m) => { setNotice(null); setMe(m); }} />;
 
   const nav = [
     ["overview", "Overview"],
-    ["onboarding", "Onboarding"],
+    ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"]] : []),
     ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
-    ...(me.team_role === "owner" ? [["audit", "Audit trail"]] : []),
+    ...(me.team_role === "owner" ? [["team", "Team"], ["audit", "Audit trail"]] : []),
   ];
   return (
     <div className="shell">
@@ -112,6 +117,7 @@ export default function App() {
         {section === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
         {section === "onboarding" && <Onboarding onEnded={ended} />}
         {section === "engine" && <Engine onEnded={ended} />}
+        {section === "team" && <Team onEnded={ended} />}
         {section === "audit" && <Audit onEnded={ended} />}
       </main>
     </div>

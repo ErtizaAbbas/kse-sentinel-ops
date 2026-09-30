@@ -150,3 +150,17 @@ export async function signOut() {
   } catch { /* the local session ends either way */ }
   setToken(null);
 }
+
+// Team signup by invitation (Sep 30 2026): the invitee is not signed in.
+export async function inviteInfo(token) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/auth/team-invite/${encodeURIComponent(token)}`, { headers: { "X-API-Key": API_KEY } });
+  } catch {
+    throw new ApiError(0, "The server could not be reached. Try again shortly.");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, describe(data.detail, res.status));
+  return data;
+}
+export const acceptInvite = (token, password) => authPost("/api/v1/auth/team-invite/accept", { token, password });
