@@ -215,3 +215,43 @@ td.acts .link { padding: 2px 6px; font-size: 12.5px; }
 tr.action-row td { background: #fbfbfd; }
 .facts.compact { margin: 0; grid-template-columns: 1fr 1fr; }
 .bad-text { color: var(--bad); }
+
+/* billing (Sep 30 2026) */
+.billing .tabs { margin-top: 6px; }
+.sub-tabs { align-items: center; }
+.inline-btn { margin: 0 0 0 auto; padding: 4px 10px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 10px; }
+.conf { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; }
+.conf-high { background: #e6f1eb; color: var(--good); }
+.conf-low { background: var(--note); color: #6e4a0a; }
+.confirm.neutral { color: var(--navy); }
+label.file input { padding: 6px; background: #fff; }
+/* invoice and receipt, on screen and on paper */
+.print-wrap { max-width: 820px; }
+.print-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+.invoice { background: #fff; border: 1px solid var(--line); padding: 40px 44px; color: var(--ink); }
+.invoice header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 3px solid var(--gold); padding-bottom: 18px; }
+.inv-brand { font-size: 22px; font-weight: 600; color: var(--navy); }
+.inv-addr { font-size: 12.5px; color: var(--slate); white-space: pre-line; }
+.inv-title { text-align: right; }
+.inv-kind { font-size: 13px; font-weight: 600; color: var(--gold); letter-spacing: 0.04em; }
+.inv-title .fig { font-size: 18px; color: var(--navy); font-weight: 500; }
+.inv-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 24px; margin: 22px 0; }
+.inv-meta dt, .inv-pay dt { font-size: 12px; color: var(--muted); }
+.inv-meta dd, .inv-pay dd { margin: 2px 0 0; }
+.inv-lines { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.inv-lines th { text-align: left; border-bottom: 1px solid var(--line-2); padding: 8px 6px; font-size: 12.5px; color: var(--slate); }
+.inv-lines td { padding: 10px 6px; border-bottom: 1px solid var(--line); }
+.inv-lines .r { text-align: right; }
+.inv-lines tr.total td { font-weight: 600; border-bottom: 0; border-top: 2px solid var(--navy); }
+.inv-pay { margin-top: 24px; padding: 14px 16px; background: var(--page); }
+.inv-pay dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; margin: 8px 0; }
+.inv-paid { margin-top: 22px; font-weight: 600; color: var(--good); }
+.inv-note { margin-top: 18px; font-size: 12.5px; color: var(--slate); white-space: pre-line; }
+@media print {
+  .rail, .no-print { display: none !important; }
+  .shell { display: block; background: #fff; }
+  .work { padding: 0; }
+  .invoice { border: 0; padding: 0; }
+  body { background: #fff; }
+}

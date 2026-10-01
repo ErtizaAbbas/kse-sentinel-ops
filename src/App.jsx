@@ -18,6 +18,7 @@ import { api, hasSession, SessionEnded, signIn, signOut, setupMfa, verifyMfa } f
 import QRCode from "qrcode";
 import Engine from "./Engine.jsx";
 import Team from "./Team.jsx";
+import Billing from "./Billing.jsx";
 import Join from "./Join.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
@@ -93,6 +94,7 @@ export default function App() {
     ["overview", "Overview"],
     ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"]] : []),
     ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
+    ...(["owner", "finance"].includes(me.team_role) ? [["billing", "Billing"]] : []),
     ...(me.team_role === "owner" ? [["team", "Team"], ["audit", "Audit trail"]] : []),
   ];
   return (
@@ -117,6 +119,7 @@ export default function App() {
         {section === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
         {section === "onboarding" && <Onboarding onEnded={ended} />}
         {section === "engine" && <Engine onEnded={ended} />}
+        {section === "billing" && <Billing onEnded={ended} role={me.team_role} />}
         {section === "team" && <Team onEnded={ended} />}
         {section === "audit" && <Audit onEnded={ended} />}
       </main>
