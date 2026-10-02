@@ -19,6 +19,7 @@ import QRCode from "qrcode";
 import Engine from "./Engine.jsx";
 import Team from "./Team.jsx";
 import Billing from "./Billing.jsx";
+import Walkthroughs from "./Walkthroughs.jsx";
 import Join from "./Join.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
@@ -92,7 +93,7 @@ export default function App() {
 
   const nav = [
     ["overview", "Overview"],
-    ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"]] : []),
+    ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"], ["walkthroughs", "Walkthroughs"]] : []),
     ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
     ...(["owner", "finance"].includes(me.team_role) ? [["billing", "Billing"]] : []),
     ...(me.team_role === "owner" ? [["team", "Team"], ["audit", "Audit trail"]] : []),
@@ -120,6 +121,7 @@ export default function App() {
         {section === "onboarding" && <Onboarding onEnded={ended} />}
         {section === "engine" && <Engine onEnded={ended} />}
         {section === "billing" && <Billing onEnded={ended} role={me.team_role} />}
+        {section === "walkthroughs" && <Walkthroughs onEnded={ended} />}
         {section === "team" && <Team onEnded={ended} />}
         {section === "audit" && <Audit onEnded={ended} />}
       </main>
