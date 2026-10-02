@@ -255,3 +255,8 @@ label.file input { padding: 6px; background: #fff; }
   .invoice { border: 0; padding: 0; }
   body { background: #fff; }
 }
+
+/* engineering (Oct 2026) */
+.rules { margin: 0; padding-left: 20px; } .rules li { margin: 6px 0; }
+.small-n { font-size: 18px !important; }
+label.check { flex-direction: row; align-items: center; gap: 8px; margin: 6px 0; font-size: 13.5px; }

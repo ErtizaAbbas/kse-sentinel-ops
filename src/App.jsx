@@ -20,6 +20,7 @@ import Engine from "./Engine.jsx";
 import Team from "./Team.jsx";
 import Billing from "./Billing.jsx";
 import Walkthroughs from "./Walkthroughs.jsx";
+import Engineering from "./Engineering.jsx";
 import Join from "./Join.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
@@ -58,6 +59,7 @@ const PKT_DAY = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", day
 const when = (iso) => (iso ? `${PKT.format(new Date(iso))} PKT` : "");
 const day = (iso) => (iso ? PKT_DAY.format(new Date(iso)) : "");
 const pkr = (n) => (n == null ? "" : `PKR ${Number(n).toLocaleString("en-PK")}`);
+const ROLE_LABEL = { owner: "Owner", reviewer: "Onboarding", walkthrough: "Walkthrough", support: "Support", finance: "Finance", frontend_engineer: "Frontend engineer" };
 const daysLeft = (iso) => (iso ? Math.ceil((new Date(iso) - Date.now()) / 86400000) : null);
 
 /* ------------------------------------------------------------ shell */
@@ -91,13 +93,18 @@ export default function App() {
   if (checking) return <div className="boot">Checking your session</div>;
   if (!me) return <SignIn notice={notice} onSignedIn={(m) => { setNotice(null); setMe(m); }} />;
 
+  // Each role sees only what it may open (the server enforces the same rules).
   const nav = [
-    ["overview", "Overview"],
-    ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"], ["walkthroughs", "Walkthroughs"]] : []),
+    ...(me.team_role !== "frontend_engineer" ? [["overview", "Overview"]] : []),
+    ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"]] : []),
+    ...(["owner", "reviewer", "walkthrough"].includes(me.team_role) ? [["walkthroughs", "Walkthroughs"]] : []),
     ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
     ...(["owner", "finance"].includes(me.team_role) ? [["billing", "Billing"]] : []),
+    ...(["owner", "frontend_engineer"].includes(me.team_role) ? [["engineering", "Engineering"]] : []),
     ...(me.team_role === "owner" ? [["team", "Team"], ["audit", "Audit trail"]] : []),
   ];
+  // A role that cannot open the remembered section starts on its first allowed one.
+  const current = nav.some(([id]) => id === section) ? section : nav[0][0];
   return (
     <div className="shell">
       <aside className="rail">
@@ -107,23 +114,24 @@ export default function App() {
         </div>
         <nav>
           {nav.map(([id, label]) => (
-            <button key={id} className={section === id ? "on" : ""} onClick={() => setSection(id)}>{label}</button>
+            <button key={id} className={current === id ? "on" : ""} onClick={() => setSection(id)}>{label}</button>
           ))}
         </nav>
         <div className="who">
           <div>{me.email}</div>
-          <div className="role">Team role: {me.team_role}</div>
+          <div className="role">Team role: {ROLE_LABEL[me.team_role] || me.team_role}</div>
           <button className="link" onClick={async () => { await signOut(); setMe(null); }}>Sign out</button>
         </div>
       </aside>
       <main className="work">
-        {section === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
-        {section === "onboarding" && <Onboarding onEnded={ended} />}
-        {section === "engine" && <Engine onEnded={ended} />}
-        {section === "billing" && <Billing onEnded={ended} role={me.team_role} />}
-        {section === "walkthroughs" && <Walkthroughs onEnded={ended} />}
-        {section === "team" && <Team onEnded={ended} />}
-        {section === "audit" && <Audit onEnded={ended} />}
+        {current === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
+        {current === "onboarding" && <Onboarding onEnded={ended} />}
+        {current === "engine" && <Engine onEnded={ended} />}
+        {current === "billing" && <Billing onEnded={ended} role={me.team_role} />}
+        {current === "walkthroughs" && <Walkthroughs onEnded={ended} />}
+        {current === "engineering" && <Engineering onEnded={ended} role={me.team_role} />}
+        {current === "team" && <Team onEnded={ended} />}
+        {current === "audit" && <Audit onEnded={ended} />}
       </main>
     </div>
   );

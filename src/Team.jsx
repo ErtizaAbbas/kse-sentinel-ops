@@ -10,11 +10,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 
-const ROLE = { owner: "Owner", reviewer: "Reviewer", support: "Support", finance: "Finance" };
+const ROLE = { owner: "Owner", reviewer: "Onboarding", walkthrough: "Walkthrough", support: "Support", finance: "Finance", frontend_engineer: "Frontend engineer" };
+const ROLES = ["reviewer", "walkthrough", "support", "finance", "frontend_engineer"];
 const ROLE_NOTE = {
-  reviewer: "Onboarding: reviews signups, approves, rejects, runs trials.",
+  reviewer: "Onboarding: reviews signups, approves, rejects, runs trials; sees walkthroughs.",
+  walkthrough: "Walkthroughs only: follows up, extends or stops walkthrough accounts.",
   support: "Operations: the Engine section, and tickets once they exist.",
-  finance: "Payments, once the payments section exists.",
+  finance: "Billing: invoices, bank statements, payment confirmation.",
+  frontend_engineer: "Engineering page only: development repositories, test account. No business data.",
 };
 const STATE = { pending: "Waiting to be accepted", accepted: "Accepted", revoked: "Withdrawn", expired: "Expired" };
 const PKT = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -92,7 +95,7 @@ function Invite({ onEnded, onCreated }) {
         <label>Name (optional)<input value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label>Role
           <select value={role} onChange={(e) => setRole(e.target.value)}>
-            {["reviewer", "support", "finance"].map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}
+            {ROLES.map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}
           </select>
           <span className="hint">{ROLE_NOTE[role]}</span>
         </label>
@@ -186,7 +189,7 @@ function MemberAction({ m, mode, onEnded, onDone, onCancel }) {
       {mode === "role" && (
         <label className="inline">New role
           <select value={role} onChange={(e) => setRole(e.target.value)}>
-            {["reviewer", "support", "finance"].map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}
+            {ROLES.map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}
           </select>
         </label>
       )}
