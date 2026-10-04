@@ -26,7 +26,7 @@ export default function Walkthroughs({ onEnded }) {
   return (
     <section>
       <h1>Walkthroughs</h1>
-      <p className="quiet">Instant, read-only, 14-day access to the showcase (PPL, OGDC, HBL, LUCK, JLICL). Upgrading to full access requires the full requirements, so these stay listed until then.</p>
+      <p className="quiet">Instant, read-only, 14-day access to the showcase (PPL, HBL, LUCK, JLICL). Upgrading to full access requires the full requirements, so these stay listed until then.</p>
       {error && <p className="msg bad">{error}</p>}
       {data && (
         <>
