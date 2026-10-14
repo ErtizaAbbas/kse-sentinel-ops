@@ -1,17 +1,22 @@
 /*
- * src/App.jsx  (kse-sentinel-ops, Sep 29 2026)
+ * src/App.jsx  (kse-sentinel-ops, Sep 29 2026; Oct 14 2026: Data API, Secrets, step-up, resets)
  *
  * Sentinel Operations, Phase A: the MZE Digital team's internal console.
  * Spec: KSE_Sentinel_Operations_Console_Spec.md (v3).
  *
  *   Overview    queue counts, trials ending within 7 days, recent actions
  *   Onboarding  queue on the left, the selected record on the right:
- *               details, reviewer checklist, decisions, trial controls, history
+ *               details, reviewer checklist, decisions, trial controls,
+ *               history, users (with Reset MFA for a client user)
+ *   Data API    the client Data API through the backend proxy (DataApi.jsx)
+ *   Secrets     inventory of keys and passwords, no values (Secrets.jsx)
  *   Audit       every console action (owner only)
  *
  * Every decision needs a written reason: the button stays disabled until one
  * is given, and irreversible decisions ask for a second confirmation.
+ * Sensitive actions also need a recent authenticator code (StepUp.jsx).
  * Times are shown in Pakistan time (PKT).
+ * Signed-out pages: /join (invitation) and /reset-password (team password reset).
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, hasSession, SessionEnded, signIn, signOut, setupMfa, verifyMfa } from "./api.js";
@@ -22,6 +27,12 @@ import Billing from "./Billing.jsx";
 import Walkthroughs from "./Walkthroughs.jsx";
 import Engineering from "./Engineering.jsx";
 import Join from "./Join.jsx";
+import ResetPassword from "./ResetPassword.jsx";
+import DataApi from "./DataApi.jsx";
+import Secrets from "./Secrets.jsx";
+import { StepUpChip, StepUpProvider, useAction } from "./StepUp.jsx";
+import { can } from "./roles.js";
+import { ErrorLine, ReasonBox } from "./ui.jsx";
 
 /* ------------------------------------------------------------ vocabulary */
 
@@ -70,6 +81,7 @@ export default function App() {
   const [section, setSection] = useState("overview");
   const [notice, setNotice] = useState(null);
   const [joining, setJoining] = useState(window.location.pathname === "/join");
+  const [resetting, setResetting] = useState(window.location.pathname === "/reset-password");
 
   const ended = useCallback((err) => {
     if (err instanceof SessionEnded) {
@@ -90,6 +102,8 @@ export default function App() {
 
   // An invitation link opens the join page, whatever the session state.
   if (joining) return <Join onDone={() => { setJoining(false); window.history.replaceState(null, "", "/"); }} />;
+  // A password reset link opens its page whatever the session state (the member is signed out).
+  if (resetting) return <ResetPassword onDone={() => { setResetting(false); window.history.replaceState(null, "", "/"); }} />;
   if (checking) return <div className="boot">Checking your session</div>;
   if (!me) return <SignIn notice={notice} onSignedIn={(m) => { setNotice(null); setMe(m); }} />;
 
@@ -98,42 +112,49 @@ export default function App() {
     ...(me.team_role !== "frontend_engineer" ? [["overview", "Overview"]] : []),
     ...(["owner", "reviewer"].includes(me.team_role) ? [["onboarding", "Onboarding"]] : []),
     ...(["owner", "reviewer", "walkthrough"].includes(me.team_role) ? [["walkthroughs", "Walkthroughs"]] : []),
+    ...(can(me.team_role, "dapiRead") ? [["dataapi", "Data API"]] : []),
     ...(["owner", "support"].includes(me.team_role) ? [["engine", "Engine"]] : []),
     ...(["owner", "finance"].includes(me.team_role) ? [["billing", "Billing"]] : []),
     ...(["owner", "frontend_engineer"].includes(me.team_role) ? [["engineering", "Engineering"]] : []),
+    ...(can(me.team_role, "secretsRead") ? [["secrets", "Secrets"]] : []),
     ...(me.team_role === "owner" ? [["team", "Team"], ["audit", "Audit trail"]] : []),
   ];
   // A role that cannot open the remembered section starts on its first allowed one.
   const current = nav.some(([id]) => id === section) ? section : nav[0][0];
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="brand">
-          <span className="brand-mark">KSE Sentinel</span>
-          <span className="brand-name">Operations</span>
-        </div>
-        <nav>
-          {nav.map(([id, label]) => (
-            <button key={id} className={current === id ? "on" : ""} onClick={() => setSection(id)}>{label}</button>
-          ))}
-        </nav>
-        <div className="who">
-          <div>{me.email}</div>
-          <div className="role">Team role: {ROLE_LABEL[me.team_role] || me.team_role}</div>
-          <button className="link" onClick={async () => { await signOut(); setMe(null); }}>Sign out</button>
-        </div>
-      </aside>
-      <main className="work">
-        {current === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
-        {current === "onboarding" && <Onboarding onEnded={ended} />}
-        {current === "engine" && <Engine onEnded={ended} />}
-        {current === "billing" && <Billing onEnded={ended} role={me.team_role} />}
-        {current === "walkthroughs" && <Walkthroughs onEnded={ended} />}
-        {current === "engineering" && <Engineering onEnded={ended} role={me.team_role} />}
-        {current === "team" && <Team onEnded={ended} />}
-        {current === "audit" && <Audit onEnded={ended} />}
-      </main>
-    </div>
+    <StepUpProvider>
+      <div className="shell">
+        <aside className="rail">
+          <div className="brand">
+            <span className="brand-mark">KSE Sentinel</span>
+            <span className="brand-name">Operations</span>
+          </div>
+          <nav>
+            {nav.map(([id, label]) => (
+              <button key={id} className={current === id ? "on" : ""} onClick={() => setSection(id)}>{label}</button>
+            ))}
+          </nav>
+          <div className="who">
+            <div>{me.email}</div>
+            <div className="role">Team role: {ROLE_LABEL[me.team_role] || me.team_role}</div>
+            <StepUpChip />
+            <button className="link" onClick={async () => { await signOut(); setMe(null); }}>Sign out</button>
+          </div>
+        </aside>
+        <main className="work">
+          {current === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
+          {current === "onboarding" && <Onboarding onEnded={ended} role={me.team_role} />}
+          {current === "dataapi" && <DataApi me={me} onEnded={ended} />}
+          {current === "engine" && <Engine onEnded={ended} />}
+          {current === "billing" && <Billing onEnded={ended} role={me.team_role} />}
+          {current === "walkthroughs" && <Walkthroughs onEnded={ended} />}
+          {current === "engineering" && <Engineering onEnded={ended} role={me.team_role} />}
+          {current === "secrets" && <Secrets me={me} onEnded={ended} />}
+          {current === "team" && <Team onEnded={ended} />}
+          {current === "audit" && <Audit onEnded={ended} />}
+        </main>
+      </div>
+    </StepUpProvider>
   );
 }
 
@@ -297,7 +318,7 @@ function Overview({ onEnded, onOpen }) {
 
 /* ------------------------------------------------------------ onboarding */
 
-function Onboarding({ onEnded }) {
+function Onboarding({ onEnded, role }) {
   const [queue, setQueue] = useState(QUEUES[0]);
   const [list, setList] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -341,14 +362,14 @@ function Onboarding({ onEnded }) {
       </div>
       <div className="record">
         {selected
-          ? <Record key={selected} tenantId={selected} onEnded={onEnded} onChanged={load} />
+          ? <Record key={selected} tenantId={selected} role={role} onEnded={onEnded} onChanged={load} />
           : <p className="quiet empty">Select a record from the list.</p>}
       </div>
     </section>
   );
 }
 
-function Record({ tenantId, onEnded, onChanged }) {
+function Record({ tenantId, role, onEnded, onChanged }) {
   const [rec, setRec] = useState(null);
   const [error, setError] = useState(null);
   const load = useCallback(() => {
@@ -410,18 +431,59 @@ function Record({ tenantId, onEnded, onChanged }) {
           <table className="plain">
             <tbody>
               {rec.users.map((u) => (
-                <tr key={u.user_id}>
-                  <td>{u.email}</td>
-                  <td>{u.role}</td>
-                  <td>{u.email_verified ? "Email verified" : "Email not verified"}</td>
-                  <td className="fig">{u.last_login_at ? `Last sign-in ${when(u.last_login_at)}` : "Never signed in"}</td>
-                </tr>
+                <UserRow key={u.user_id} u={u} canReset={can(role, "clientMfaReset")} onEnded={onEnded} />
               ))}
             </tbody>
           </table>
         </>
       )}
     </article>
+  );
+}
+
+/* Reset MFA for a client user (Oct 14 2026): clears their authenticator and
+   recovery codes and ends their sessions. Support, Onboarding and Owner;
+   a reason of at least 10 characters and a recent authenticator code.
+   Backend: POST /api/v1/auth/mfa/client/ops/users/{user_id}/reset (refuses team accounts). */
+function UserRow({ u, canReset, onEnded }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [done, setDone] = useState(null);
+  const [state, go] = useAction(onEnded);
+  return (
+    <>
+      <tr>
+        <td>{u.email}</td>
+        <td>{u.role}</td>
+        <td>{u.email_verified ? "Email verified" : "Email not verified"}</td>
+        <td className="fig">{u.last_login_at ? `Last sign-in ${when(u.last_login_at)}` : "Never signed in"}</td>
+        <td className="acts">{canReset && !open && <button className="link" onClick={() => { setDone(null); setOpen(true); }}>Reset MFA</button>}</td>
+      </tr>
+      {(open || done) && (
+        <tr className="action-row">
+          <td colSpan="5">
+            {done && <p className="msg good">{done}</p>}
+            {open && (
+              <ReasonBox reason={reason} setReason={setReason} min={10} label="Reset MFA" busy={state?.busy} sensitive danger
+                         title={`Reset MFA for ${u.email}`}
+                         hint="Clears their authenticator and recovery codes and signs them out everywhere. At next sign-in they set up MFA again if their firm requires it."
+                         confirmText="Reset this user's MFA now? Only do this after confirming who they are, for example by a call-back to a number on file."
+                         placeholder="How was the person verified, and why is the reset needed?"
+                         onCancel={() => setOpen(false)}
+                         onSubmit={async () => {
+                           const r = await go(() => api(`/api/v1/auth/mfa/client/ops/users/${encodeURIComponent(u.user_id)}/reset`, { method: "POST", body: { reason } }));
+                           if (r !== undefined) {
+                             setOpen(false);
+                             setReason("");
+                             setDone(`MFA reset for ${u.email}: authenticator and recovery codes cleared, sessions ended.`);
+                           }
+                         }} />
+            )}
+            {open && <ErrorLine error={state?.error} />}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

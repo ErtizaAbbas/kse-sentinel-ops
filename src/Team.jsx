@@ -1,32 +1,38 @@
 /*
- * src/Team.jsx  (kse-sentinel-ops, Sep 30 2026)
+ * src/Team.jsx  (kse-sentinel-ops, Sep 30 2026; Oct 14 2026: step-up, password reset)
  *
  * TEAM: the Owner's page for the MZE Digital team. Invite people (one-time
  * link, valid 72 hours, passed on privately), change roles, deactivate or
- * reactivate, reset a lost authenticator. Every action needs a reason and is
- * audited. Your own account cannot be changed here.
+ * reactivate, reset a lost authenticator, reset a password. Every action
+ * needs a reason and is audited. Your own account cannot be changed here.
+ *
+ * Oct 14 2026: changing a role, resetting an authenticator and resetting a
+ * password need a recent authenticator code (step-up). A password reset ends
+ * the member's old password and sessions at once and gives a one-time link,
+ * valid 30 minutes, shown here once: /reset-password#token=...
  * Backend: app/routers/ops_team.py
  */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
+import { useAction } from "./StepUp.jsx";
+import { ErrorLine, ShowOnce, when } from "./ui.jsx";
 
 const ROLE = { owner: "Owner", reviewer: "Onboarding", walkthrough: "Walkthrough", support: "Support", finance: "Finance", frontend_engineer: "Frontend engineer" };
 const ROLES = ["reviewer", "walkthrough", "support", "finance", "frontend_engineer"];
 const ROLE_NOTE = {
-  reviewer: "Onboarding: reviews signups, approves, rejects, runs trials; sees walkthroughs.",
+  reviewer: "Onboarding: reviews signups, approves, rejects, runs trials; sees walkthroughs, the Data API and the secrets inventory.",
   walkthrough: "Walkthroughs only: follows up, extends or stops walkthrough accounts.",
-  support: "Operations: the Engine section, and tickets once they exist.",
-  finance: "Billing: invoices, bank statements, payment confirmation.",
+  support: "Operations: the Engine section, the Data API (read, resume webhooks), and tickets once they exist.",
+  finance: "Billing: invoices, bank statements, payment confirmation; Data API reads and licence approvals.",
   frontend_engineer: "Engineering page only: development repositories, test account. No business data.",
 };
 const STATE = { pending: "Waiting to be accepted", accepted: "Accepted", revoked: "Withdrawn", expired: "Expired" };
-const PKT = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-const when = (iso) => (iso ? `${PKT.format(new Date(iso))} PKT` : "");
 
 export default function Team({ onEnded }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [fresh, setFresh] = useState(null);   // the one-time link just created
+  const [fresh, setFresh] = useState(null);   // the one-time invitation link just created
+  const [reset, setReset] = useState(null);   // the one-time password reset link just created
   const load = useCallback(() => {
     api("/api/v1/ops-console/team").then(setData).catch((e) => { if (!onEnded(e)) setError(e.message); });
   }, [onEnded]);
@@ -39,6 +45,10 @@ export default function Team({ onEnded }) {
       {error && <p className="msg bad">{error}</p>}
       <Invite onEnded={onEnded} onCreated={(link) => { setFresh(link); load(); }} />
       {fresh && <LinkBox link={fresh} onClose={() => setFresh(null)} />}
+      {reset && (
+        <ShowOnce title={`Password reset link for ${reset.who}`} value={reset.url} copyLabel="Copy link" onClose={() => setReset(null)}
+                  notice={`Valid for 30 minutes${reset.expires ? `, until ${when(reset.expires)}` : ""}. Their old password and sessions have already stopped. Send it to them privately; they choose a new password, then sign in with their authenticator as usual.`} />
+      )}
       {data && (
         <>
           <h2>Members</h2>
@@ -47,7 +57,8 @@ export default function Team({ onEnded }) {
               <thead><tr><th>Person</th><th>Role</th><th>Authenticator</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
               <tbody>
                 {data.members.map((m) => (
-                  <MemberRow key={m.user_id} m={m} onEnded={onEnded} onChanged={load} />
+                  <MemberRow key={m.user_id} m={m} onEnded={onEnded} onChanged={load}
+                             onReset={(r) => { setReset({ ...r, who: m.name || m.email }); load(); }} />
                 ))}
               </tbody>
             </table>
@@ -126,7 +137,7 @@ function LinkBox({ link, onClose }) {
   );
 }
 
-function MemberRow({ m, onEnded, onChanged }) {
+function MemberRow({ m, onEnded, onChanged, onReset }) {
   const [mode, setMode] = useState(null);
   const status = !m.is_active ? "Deactivated" : m.locked ? "Locked (failed attempts)" : "Active";
   return (
@@ -145,6 +156,7 @@ function MemberRow({ m, onEnded, onChanged }) {
                 ? <button className="link" onClick={() => setMode("deactivate")}>Deactivate</button>
                 : <button className="link" onClick={() => setMode("reactivate")}>Reactivate</button>}
               {m.mfa_enabled && <button className="link" onClick={() => setMode("mfa")}>Reset authenticator</button>}
+              {m.is_active && <button className="link" onClick={() => setMode("password")}>Reset password</button>}
             </>
           )}
         </td>
@@ -152,7 +164,8 @@ function MemberRow({ m, onEnded, onChanged }) {
       {mode && (
         <tr className="action-row">
           <td colSpan="6">
-            <MemberAction m={m} mode={mode} onEnded={onEnded} onDone={() => { setMode(null); onChanged(); }} onCancel={() => setMode(null)} />
+            <MemberAction m={m} mode={mode} onEnded={onEnded} onCancel={() => setMode(null)}
+                          onDone={(r) => { setMode(null); if (mode === "password" && r?.token) onReset(r); else onChanged(); }} />
           </td>
         </tr>
       )}
@@ -160,27 +173,35 @@ function MemberRow({ m, onEnded, onChanged }) {
   );
 }
 
+const ACTIONS = {
+  role: { label: "Change role", path: "role", method: "PUT", danger: false, stepUp: true, hint: "Takes effect on their next request." },
+  deactivate: { label: "Deactivate", path: "deactivate", method: "POST", danger: true, stepUp: false, hint: "Sign-in is refused at once and their sessions end. Their history stays." },
+  reactivate: { label: "Reactivate", path: "reactivate", method: "POST", danger: false, stepUp: false, hint: "They can sign in again with their password and authenticator." },
+  mfa: { label: "Reset authenticator", path: "reset-mfa", method: "POST", danger: true, stepUp: true, hint: "Their sessions end; at next sign-in they scan a new QR code." },
+  password: { label: "Reset password", path: "password-reset", method: "POST", danger: true, stepUp: true,
+    hint: "Their current password and sessions stop at once. You get a one-time link, valid 30 minutes, to send them; they choose a new password with it." },
+};
+
 function MemberAction({ m, mode, onEnded, onDone, onCancel }) {
   const [reason, setReason] = useState("");
   const [role, setRole] = useState(m.team_role === "owner" ? "reviewer" : m.team_role);
   const [confirm, setConfirm] = useState(false);
-  const [state, setState] = useState(null);
-  const cfg = {
-    role: { label: "Change role", path: "role", method: "PUT", danger: false, hint: "Takes effect on their next request." },
-    deactivate: { label: "Deactivate", path: "deactivate", method: "POST", danger: true, hint: "Sign-in is refused at once and their sessions end. Their history stays." },
-    reactivate: { label: "Reactivate", path: "reactivate", method: "POST", danger: false, hint: "They can sign in again with their password and authenticator." },
-    mfa: { label: "Reset authenticator", path: "reset-mfa", method: "POST", danger: true, hint: "Their sessions end; at next sign-in they scan a new QR code." },
-  }[mode];
+  const [state, go] = useAction(onEnded);
+  const cfg = ACTIONS[mode];
   const ok = reason.trim().length >= 5 && (mode !== "role" || role !== m.team_role);
-  async function go() {
+  async function run() {
     if (cfg.danger && !confirm) { setConfirm(true); return; }
-    setState({ busy: true });
-    try {
-      await api(`/api/v1/ops-console/team/members/${m.user_id}/${cfg.path}`, { method: cfg.method, body: mode === "role" ? { reason, team_role: role } : { reason } });
-      onDone();
-    } catch (e) {
-      if (!onEnded(e)) setState({ bad: e.message });
-    }
+    const r = await go(() => api(`/api/v1/ops-console/team/members/${m.user_id}/${cfg.path}`, {
+      method: cfg.method, body: mode === "role" ? { reason, team_role: role } : { reason },
+    }), { sensitive: cfg.stepUp });
+    if (r === undefined) return;
+    if (mode === "password") {
+      onDone({
+        token: r.token,
+        url: `${window.location.origin}/reset-password#token=${encodeURIComponent(r.token || "")}`,
+        expires: r.expires_at,
+      });
+    } else onDone(r);
   }
   return (
     <div className={`reasoned ${cfg.danger ? "danger" : ""}`}>
@@ -196,14 +217,15 @@ function MemberAction({ m, mode, onEnded, onDone, onCancel }) {
       <label>Reason, recorded in the audit trail
         <textarea rows="2" value={reason} onChange={(e) => { setReason(e.target.value); setConfirm(false); }} />
       </label>
+      {cfg.stepUp && <span className="hint">Needs a recent authenticator code; you will be asked for one if it has expired.</span>}
       {confirm && <p className="confirm">Are you sure? {cfg.hint}</p>}
       <div className="row">
-        <button className={cfg.danger ? "danger" : "primary"} disabled={!ok || state?.busy} onClick={go}>
+        <button className={cfg.danger ? "danger" : "primary"} disabled={!ok || state?.busy} onClick={run}>
           {state?.busy ? "Saving" : confirm ? `Yes, ${cfg.label.toLowerCase()}` : cfg.label}
         </button>
         <button className="link" onClick={onCancel}>Cancel</button>
       </div>
-      {state?.bad && <p className="msg bad">{state.bad}</p>}
+      <ErrorLine error={state?.error} />
     </div>
   );
 }
