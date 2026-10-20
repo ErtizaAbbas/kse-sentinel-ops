@@ -6,6 +6,9 @@
  * Clients   list and detail; change plan, suspend or reactivate, set or clear
  *           an override (units per minute, day, month; key limit). Owner and
  *           Onboarding, each with a reason and step-up.
+ *           Oct 20 2026: "Give access to a client" above the list and in the
+ *           empty state (DataApiGrant.jsx); after a grant the client's detail
+ *           opens with "Create a key" as the highlighted next step.
  * API keys  list per client; create (the key is shown once and never stored);
  *           revoke with a reason; Rotate:
  *             1. a new key with the same kind, scopes and address list, named
@@ -15,10 +18,11 @@
  *                flagged "Due for revoke" once that date has passed;
  *                with no overlap, the old key is revoked straight away.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 import { can } from "./roles.js";
 import { useAction } from "./StepUp.jsx";
+import { GiveAccess } from "./DataApiGrant.jsx";
 import { addDaysPkt, Badge, ErrorLine, endOfDayPkt, num, ReasonBox, ShowOnce, todayPkt, when } from "./ui.jsx";
 
 const D = "/api/v1/ops/dapi";
@@ -44,17 +48,27 @@ const limitOf = (t, plans, field) => t?.overrides?.[field] ?? plans.find((p) => 
 
 /* ============================================================ clients */
 
-export function Clients({ me, tenants, plans, onEnded, onChanged, onOpenKeys }) {
-  const [selected, setSelected] = useState(tenants[0]?.tenant_id ?? null);
+/* focus: { tenantId, justGranted, n } opens that client (n changes on every new focus). */
+export function Clients({ me, tenants, plans, onEnded, onChanged, onOpenKeys, focus, onGranted }) {
+  const [selected, setSelected] = useState(focus?.tenantId ?? tenants[0]?.tenant_id ?? null);
+  const [granting, setGranting] = useState(false);
+  const canGrant = can(me.team_role, "tenantWrite");
   useEffect(() => { if (selected == null && tenants.length) setSelected(tenants[0].tenant_id); }, [tenants, selected]);
+  useEffect(() => { if (focus?.tenantId != null) { setSelected(focus.tenantId); setGranting(false); } }, [focus?.n, focus?.tenantId]);
+  const giveButton = canGrant && !granting && (
+    <button className="primary" onClick={() => setGranting(true)}>Give access to a client</button>
+  );
   return (
     <div className="split-view">
       <div>
-        {tenants.length === 0 ? <p className="quiet">No Data API clients yet.</p> : (
+        {giveButton && <div className="list-actions">{giveButton}</div>}
+        {tenants.length === 0 ? (
+          <p className="quiet">No Data API clients yet.{canGrant ? " Give an Onboarding client access to start." : ""}</p>
+        ) : (
           <ul className="rows">
             {tenants.map((t) => (
               <li key={t.tenant_id}>
-                <button className={selected === t.tenant_id ? "on" : ""} onClick={() => setSelected(t.tenant_id)}>
+                <button className={!granting && selected === t.tenant_id ? "on" : ""} onClick={() => { setGranting(false); setSelected(t.tenant_id); }}>
                   <span className="co">{t.name}</span>
                   <span className="sub">
                     {plans.find((p) => p.key === t.plan)?.name || t.plan}, {t.status === "active" ? "active" : <span className="down">{t.status}</span>}
@@ -69,19 +83,30 @@ export function Clients({ me, tenants, plans, onEnded, onChanged, onOpenKeys }) 
         )}
       </div>
       <div className="record">
-        {selected != null
-          ? <ClientDetail key={selected} id={selected} me={me} plans={plans} onEnded={onEnded} onChanged={onChanged} onOpenKeys={onOpenKeys} />
-          : <p className="quiet empty">Select a client from the list.</p>}
+        {granting ? (
+          <GiveAccess tenants={tenants} plans={plans} onEnded={onEnded}
+                      onCancel={() => setGranting(false)}
+                      onGranted={(id) => { setGranting(false); onGranted(id); }} />
+        ) : selected != null ? (
+          <ClientDetail key={selected} id={selected} me={me} plans={plans} onEnded={onEnded} onChanged={onChanged} onOpenKeys={onOpenKeys}
+                        justGranted={!!focus?.justGranted && focus.tenantId === selected} />
+        ) : (
+          <div className="empty">
+            <p className="quiet">{tenants.length ? "Select a client from the list." : "No Data API clients yet."}</p>
+            {giveButton}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function ClientDetail({ id, me, plans, onEnded, onChanged, onOpenKeys }) {
+function ClientDetail({ id, me, plans, onEnded, onChanged, onOpenKeys, justGranted }) {
   const [t, setT] = useState(null);
   const [error, setError] = useState(null);
   const [mode, setMode] = useState(null);         // "plan" | "status" | field name
   const canWrite = can(me.team_role, "tenantWrite");
+  const canKey = can(me.team_role, "keyWrite");
   const load = useCallback(() => {
     api(`${D}/tenants/${id}`).then(setT).catch((e) => { if (!onEnded(e)) setError(e); });
   }, [id, onEnded]);
@@ -111,6 +136,12 @@ function ClientDetail({ id, me, plans, onEnded, onChanged, onOpenKeys }) {
       </dl>
       {plan && (
         <p className="hint plan-line">Plan includes: {(plan.delivery || []).join(", ")}; data sets {(plan.datasets || []).join(", ")}.</p>
+      )}
+      {justGranted && (
+        <div className="next-step">
+          <p><b>Data API access given.</b> The grant is in the audit log with your name and reason. Next: create this client's first key; it is shown once.</p>
+          {canKey && <button className="primary" autoFocus onClick={() => onOpenKeys(t.tenant_id, { create: true })}>Create a key</button>}
+        </div>
       )}
       <div className="choices top-gap">
         <button className="outline" onClick={() => onOpenKeys(t.tenant_id)}>Open API keys</button>
@@ -253,23 +284,30 @@ function OverrideRow({ t, field, lbl, planValue, has, open, canWrite, onOpen, on
 
 const MARK = /replaces (kse_(?:live|test)_[a-z0-9]+), revoke old by (\d{4}-\d{2}-\d{2})/;
 
-export function Keys({ me, tenants, plans, onEnded, initialTenant, onChanged }) {
+export function Keys({ me, tenants, plans, onEnded, initialTenant, initialCreate, onChanged }) {
   const [tenantId, setTenantId] = useState(initialTenant ?? tenants[0]?.tenant_id ?? "");
   useEffect(() => { if (tenantId === "" && tenants.length) setTenantId(tenants[0].tenant_id); }, [tenants, tenantId]);
+  const canWrite = can(me.team_role, "keyWrite");
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
   const [showRevoked, setShowRevoked] = useState(false);
-  const [creating, setCreating] = useState(false);
+  // Arriving from a new grant opens "Create a key" for that client straight away.
+  const [creating, setCreating] = useState(!!initialCreate && canWrite && initialTenant != null);
   const [mode, setMode] = useState(null);          // { kind: "revoke"|"rotate", id, reason? }
   const [shown, setShown] = useState(null);        // { title, value, notice, after }
-  const canWrite = can(me.team_role, "keyWrite");
 
   const load = useCallback(() => {
     if (tenantId === "") return;
     setError(null);
     api(`${D}/tenants/${tenantId}/keys`).then((d) => setItems(d.items || [])).catch((e) => { if (!onEnded(e)) setError(e); });
   }, [tenantId, onEnded]);
-  useEffect(() => { setItems(null); setMode(null); setCreating(false); load(); }, [load]);
+  // Open forms close only when the chosen client changes, not on the first load.
+  const shownFor = useRef(tenantId);
+  useEffect(() => {
+    if (shownFor.current !== tenantId) { shownFor.current = tenantId; setMode(null); setCreating(false); }
+    setItems(null);
+    load();
+  }, [load, tenantId]);
 
   const tenant = tenants.find((t) => t.tenant_id === Number(tenantId));
   const keyLimit = limitOf(tenant, plans, "max_credentials");

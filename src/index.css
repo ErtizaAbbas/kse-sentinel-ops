@@ -335,3 +335,14 @@ dl.kv dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
   .figures.six .figure:nth-child(n+3) { border-top: 1px solid var(--line); }
   .facts.compact-3 { grid-template-columns: 1fr; }
 }
+
+/* Data API access: give access to a client (Oct 20 2026) */
+.list-actions { margin: 0 0 12px; }
+.record .empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.plan-summary { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--gold); }
+.warn-line { color: #6e4a0a; }
+.pick-list { max-height: 46vh; overflow-y: auto; }
+.pick-list .badge { margin-top: 2px; }
+.next-step { margin: 18px 0 0; padding: 14px 16px; background: var(--note); border-left: 4px solid var(--gold); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.next-step p { margin: 0; }
+.facts.compact-3 { margin: 0; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

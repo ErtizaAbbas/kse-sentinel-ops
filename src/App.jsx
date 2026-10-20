@@ -1,5 +1,6 @@
 /*
- * src/App.jsx  (kse-sentinel-ops, Sep 29 2026; Oct 14 2026: Data API, Secrets, step-up, resets)
+ * src/App.jsx  (kse-sentinel-ops, Sep 29 2026; Oct 14 2026: Data API, Secrets, step-up, resets;
+ *              Oct 20 2026: Data API access panel on the Onboarding record)
  *
  * Sentinel Operations, Phase A: the MZE Digital team's internal console.
  * Spec: KSE_Sentinel_Operations_Console_Spec.md (v3).
@@ -7,7 +8,8 @@
  *   Overview    queue counts, trials ending within 7 days, recent actions
  *   Onboarding  queue on the left, the selected record on the right:
  *               details, reviewer checklist, decisions, trial controls,
- *               history, users (with Reset MFA for a client user)
+ *               history, users (with Reset MFA for a client user),
+ *               Data API access (give access, or open the client in Data API)
  *   Data API    the client Data API through the backend proxy (DataApi.jsx)
  *   Secrets     inventory of keys and passwords, no values (Secrets.jsx)
  *   Audit       every console action (owner only)
@@ -30,6 +32,7 @@ import Join from "./Join.jsx";
 import ResetPassword from "./ResetPassword.jsx";
 import DataApi from "./DataApi.jsx";
 import Secrets from "./Secrets.jsx";
+import { OnboardingAccessPanel } from "./DataApiGrant.jsx";
 import { StepUpChip, StepUpProvider, useAction } from "./StepUp.jsx";
 import { can } from "./roles.js";
 import { ErrorLine, ReasonBox } from "./ui.jsx";
@@ -79,6 +82,7 @@ export default function App() {
   const [me, setMe] = useState(null);
   const [checking, setChecking] = useState(hasSession());
   const [section, setSection] = useState("overview");
+  const [dapiFocus, setDapiFocus] = useState(null);   // { tenantId, justGranted, n } for the Data API section
   const [notice, setNotice] = useState(null);
   const [joining, setJoining] = useState(window.location.pathname === "/join");
   const [resetting, setResetting] = useState(window.location.pathname === "/reset-password");
@@ -121,6 +125,12 @@ export default function App() {
   ];
   // A role that cannot open the remembered section starts on its first allowed one.
   const current = nav.some(([id]) => id === section) ? section : nav[0][0];
+  // From an Onboarding record: open that client in Data API > Clients.
+  const openDataApi = (tenantId, opts) => {
+    setDapiFocus({ tenantId, justGranted: !!opts?.justGranted, n: Date.now() });
+    setSection("dataapi");
+  };
+  const go = (id) => { if (id === "dataapi") setDapiFocus(null); setSection(id); };
   return (
     <StepUpProvider>
       <div className="shell">
@@ -131,7 +141,7 @@ export default function App() {
           </div>
           <nav>
             {nav.map(([id, label]) => (
-              <button key={id} className={current === id ? "on" : ""} onClick={() => setSection(id)}>{label}</button>
+              <button key={id} className={current === id ? "on" : ""} onClick={() => go(id)}>{label}</button>
             ))}
           </nav>
           <div className="who">
@@ -143,8 +153,8 @@ export default function App() {
         </aside>
         <main className="work">
           {current === "overview" && <Overview onEnded={ended} onOpen={() => setSection("onboarding")} />}
-          {current === "onboarding" && <Onboarding onEnded={ended} role={me.team_role} />}
-          {current === "dataapi" && <DataApi me={me} onEnded={ended} />}
+          {current === "onboarding" && <Onboarding onEnded={ended} role={me.team_role} onOpenDataApi={openDataApi} />}
+          {current === "dataapi" && <DataApi key={dapiFocus?.n ?? "dapi"} me={me} onEnded={ended} focus={dapiFocus} />}
           {current === "engine" && <Engine onEnded={ended} />}
           {current === "billing" && <Billing onEnded={ended} role={me.team_role} />}
           {current === "walkthroughs" && <Walkthroughs onEnded={ended} />}
@@ -318,7 +328,7 @@ function Overview({ onEnded, onOpen }) {
 
 /* ------------------------------------------------------------ onboarding */
 
-function Onboarding({ onEnded, role }) {
+function Onboarding({ onEnded, role, onOpenDataApi }) {
   const [queue, setQueue] = useState(QUEUES[0]);
   const [list, setList] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -362,14 +372,14 @@ function Onboarding({ onEnded, role }) {
       </div>
       <div className="record">
         {selected
-          ? <Record key={selected} tenantId={selected} role={role} onEnded={onEnded} onChanged={load} />
+          ? <Record key={selected} tenantId={selected} role={role} onEnded={onEnded} onChanged={load} onOpenDataApi={onOpenDataApi} />
           : <p className="quiet empty">Select a record from the list.</p>}
       </div>
     </section>
   );
 }
 
-function Record({ tenantId, role, onEnded, onChanged }) {
+function Record({ tenantId, role, onEnded, onChanged, onOpenDataApi }) {
   const [rec, setRec] = useState(null);
   const [error, setError] = useState(null);
   const load = useCallback(() => {
@@ -424,6 +434,8 @@ function Record({ tenantId, role, onEnded, onChanged }) {
             change: h.before?.status !== h.after?.status && h.after?.status
               ? `${STATUS[h.before?.status] || h.before?.status} to ${STATUS[h.after.status] || h.after.status}` : null,
           }))} />}
+
+      {can(role, "dapiRead") && <OnboardingAccessPanel rec={rec} role={role} onEnded={onEnded} onOpenDataApi={onOpenDataApi} />}
 
       {rec.users.length > 0 && (
         <>

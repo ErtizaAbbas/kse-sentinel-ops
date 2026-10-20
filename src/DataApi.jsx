@@ -6,13 +6,16 @@
  * a Data API credential and never calls the Data API directly.
  *
  *   Overview   processes, queues, deliveries, analytics, approvals, audit rows
- *   Clients    plan, status, overrides            (DataApiClients.jsx)
+ *   Clients    plan, status, overrides; give access to a client (DataApiClients.jsx, DataApiGrant.jsx)
  *   API keys   list, create (shown once), rotate, revoke   (DataApiClients.jsx)
  *   Usage      per client and day, up to 92 days
  *   Webhooks   endpoints needing attention, resume a paused one
  *   Jobs       failed and queued jobs, error message only
  *   Licences   data set licences, requests and the approvals queue (DataApiLicences.jsx)
  *   Audit log  the Data API's hash-chained log, Verify chain (DataApiAudit.jsx)
+ *
+ * focus (Oct 20 2026): { tenantId, justGranted, n } from an Onboarding record
+ * opens Clients on that client; after a grant, "Create a key" is the next step.
  *
  * Never shown (Section 17.7): client holdings, transactions, files or results.
  * The Data API does not return them.
@@ -28,19 +31,20 @@ import AuditLog from "./DataApiAudit.jsx";
 
 const D = "/api/v1/ops/dapi";
 
-export default function DataApi({ me, onEnded }) {
+export default function DataApi({ me, onEnded, focus: initialFocus }) {
   const role = me.team_role;
   const tabs = [
     ["overview", "Overview"], ["clients", "Clients"], ["keys", "API keys"], ["usage", "Usage"],
     ["webhooks", "Webhooks"], ["jobs", "Jobs"], ["licences", "Data sets and licences"],
     ...(can(role, "dapiAudit") ? [["audit", "Audit log"]] : []),
   ];
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(initialFocus ? "clients" : "overview");
+  const [focus, setFocus] = useState(initialFocus || null);
   const [health, setHealth] = useState(null);
   const [down, setDown] = useState(null);           // the Data API cannot be used at all
   const [tenants, setTenants] = useState([]);
   const [plans, setPlans] = useState([]);
-  const [keysFor, setKeysFor] = useState(null);
+  const [keysFor, setKeysFor] = useState(null);       // { tenantId, create }
 
   const loadHealth = useCallback(() => {
     setDown(null);
@@ -83,7 +87,8 @@ export default function DataApi({ me, onEnded }) {
       <h1>Data API</h1>
       <div className="tabs" role="tablist">
         {tabs.map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={current === id} className={current === id ? "on" : ""} onClick={() => setTab(id)}>
+          <button key={id} role="tab" aria-selected={current === id} className={current === id ? "on" : ""}
+                  onClick={() => { if (id === "keys") setKeysFor((k) => (k ? { ...k, create: false } : k)); setTab(id); }}>
             {label}
             {id === "licences" && health?.approvals_pending > 0 && <span className="count">{health.approvals_pending}</span>}
           </button>
@@ -91,11 +96,14 @@ export default function DataApi({ me, onEnded }) {
       </div>
       {current === "overview" && <Overview health={health} onRefresh={loadHealth} />}
       {current === "clients" && (
-        <Clients me={me} tenants={tenants} plans={plans} onEnded={onEnded}
-                 onChanged={loadRefs} onOpenKeys={(id) => { setKeysFor(id); setTab("keys"); }} />
+        <Clients me={me} tenants={tenants} plans={plans} onEnded={onEnded} focus={focus}
+                 onChanged={loadRefs}
+                 onGranted={(id) => { loadRefs(); loadHealth(); setFocus({ tenantId: id, justGranted: true, n: Date.now() }); }}
+                 onOpenKeys={(id, opts) => { setKeysFor({ tenantId: id, create: !!opts?.create }); setFocus(null); setTab("keys"); }} />
       )}
       {current === "keys" && (
-        <Keys me={me} tenants={tenants} plans={plans} onEnded={onEnded} initialTenant={keysFor} onChanged={loadRefs} />
+        <Keys key={keysFor ? `${keysFor.tenantId}-${keysFor.create}` : "keys"} me={me} tenants={tenants} plans={plans} onEnded={onEnded}
+              initialTenant={keysFor?.tenantId} initialCreate={keysFor?.create} onChanged={loadRefs} />
       )}
       {current === "usage" && <Usage tenants={tenants} nameOf={nameOf} onEnded={onEnded} />}
       {current === "webhooks" && <Webhooks me={me} nameOf={nameOf} onEnded={onEnded} />}
